@@ -108,7 +108,7 @@ loadGroundTextures().catch( ( error ) => console.error( error ) );
 // fog
 
 const simulation = new FogSimulation( renderer, { resolution: 512, worldSize: FOG_SIZE } );
-const fogLayers = new FogLayers( simulation, { sheets: 2, segments: 192 } );
+const fogLayers = new FogLayers( simulation, { sheets: 1, segments: 192 } );
 scene.add( fogLayers );
 
 // interaction
@@ -196,6 +196,8 @@ fogFolder.add( fogLayers, 'showMesh' ).name( 'show mesh' );
 fogFolder.add( fogLayers.wireframe.material.uniforms.uWireOpacity, 'value', 0.02, 1 ).name( 'mesh opacity' );
 fogFolder.add( fogLayers, 'sheets', 1, 6, 1 );
 fogFolder.add( fogUniforms.uGrazingStart, 'value', 0, 1 ).name( 'grazing merge' );
+fogFolder.add( fogUniforms.uSwirlDetail, 'value', 0, 1 ).name( 'swirl detail' );
+fogFolder.add( fogUniforms.uResidual, 'value', 0, 1 ).name( 'hole residual' );
 fogFolder.add( heightUniforms.uThickness, 'value', 0.2, 4 ).name( 'thickness' );
 fogFolder.add( fogUniforms.uOpacity, 'value', 0.1, 6 ).name( 'density' );
 fogFolder.add( heightUniforms.uDistortion, 'value', 0, 0.6 ).name( 'distortion' );
@@ -212,6 +214,7 @@ fluidFolder.add( params, 'ringStart', 1, 4 );
 fluidFolder.add( params, 'reach', 0, 10 );
 fluidFolder.add( params, 'blastPush', 0, 5 );
 fluidFolder.add( params, 'blastWidth', 0.1, 1.5 );
+fluidFolder.add( params, 'blastSwirl', 0, 3 );
 fluidFolder.add( params, 'ringWidth', 0.2, 2 );
 fluidFolder.add( params, 'maxDensity', 1, 5 );
 fluidFolder.add( params, 'vorticity', 0, 30 );
@@ -219,6 +222,7 @@ fluidFolder.add( params, 'ambient', 0, 3 );
 fluidFolder.add( params, 'velocityDissipation', 0, 3 );
 fluidFolder.add( params, 'densityRecovery', 0, 1 );
 fluidFolder.add( params, 'offsetRecovery', 0, 1 );
+fluidFolder.add( params, 'stirDecay', 0.05, 3 );
 fluidFolder.add( params, 'pressureIterations', 1, 80, 1 );
 fluidFolder.add( { reset: () => simulation.reset() }, 'reset' );
 fluidFolder.close();

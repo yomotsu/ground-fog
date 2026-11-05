@@ -18,7 +18,7 @@ const MAX_BLASTS = 8;
 // テクスチャの u が world x、v が world z に対応し、速度は world 単位 (m/s) で持つ
 //
 // velocity : xy = 速度 (vx, vz)
-// fog      : xy = ノイズ座標のオフセット (流れで運ばれる)、z = 霧の濃度
+// fog      : xy = ノイズ座標のオフセット (流れで運ばれる)、z = 霧の濃度、w = かき乱され具合
 // divergence : x = 発散 - 湧き出し、y = 湧き出し量
 
 const vertexShader = /* glsl */`
@@ -81,11 +81,26 @@ uniform vec4 uBlasts[ ${ MAX_BLASTS } ];
 uniform vec4 uBlastShapes[ ${ MAX_BLASTS } ];
 uniform float uBlastPush;
 uniform float uBlastWidth;
+uniform float uBlastSwirl;
 uniform float uTime;
 uniform float uVorticity;
 uniform float uAmbient;
 uniform vec4 uDrag; // xy = world 位置, zw = 速度
 uniform float uDragRadius;
+
+float hash( float n ) {
+
+	return fract( sin( n ) * 43758.5453 );
+
+}
+
+// 点 center を中心に回る渦の速度変化 (spin = 1 で反時計回り)
+vec2 vortex( vec2 world, vec2 center, float radius, float spin ) {
+
+	vec2 d = world - center;
+	return spin * vec2( - d.y, d.x ) / radius * exp( - dot( d, d ) / ( radius * radius ) );
+
+}
 
 vec2 curlNoise( vec2 p ) {
 
@@ -130,6 +145,34 @@ void main() {
 		vec2 b = world - ( blast.xy + forward * blast.z * 0.7 );
 		vec2 local = vec2( dot( b, forward ), dot( b, side ) ) / ( blast.z * vec2( 1.6, uBlastWidth ) );
 		force += forward * blast.w * uBlastPush * exp( - dot( local, local ) );
+
+		// 前縁の弧と一緒に前へ運ばれる渦
+		// 両端: 逆回転の大きな渦のペア。間の流れを前へ押し、外側へ巻き込む (キノコ雲の傘)
+		// 途中: 向きと位置がクリックごとにランダムな小さな渦
+		float seed = uBlastShapes[ i ].w;
+		float arcRadius = uBlastShapes[ i ].z;
+		float halfAngle = 0.785 * uBlastWidth;
+		float swirl = blast.w * uBlastSwirl;
+
+		for ( int k = 0; k < 2; k ++ ) {
+
+			float spin = k == 0 ? 1.0 : - 1.0;
+			float angle = spin * halfAngle * ( 0.75 + 0.3 * hash( seed + float( k ) ) );
+			vec2 center = blast.xy + ( forward * cos( angle ) + side * sin( angle ) ) * arcRadius * 0.85;
+			force += vortex( world, center, blast.z * 0.7, spin ) * swirl;
+
+		}
+
+		for ( int k = 0; k < 3; k ++ ) {
+
+			float random = hash( seed + 7.0 + float( k ) * 3.1 );
+			float angle = ( random * 2.0 - 1.0 ) * halfAngle * 0.7;
+			float radius = arcRadius * ( 0.55 + 0.4 * hash( seed + 11.0 + float( k ) ) );
+			vec2 center = blast.xy + ( forward * cos( angle ) + side * sin( angle ) ) * radius;
+			float spin = hash( seed + 19.0 + float( k ) ) > 0.5 ? 1.0 : - 1.0;
+			force += vortex( world, center, blast.z * 0.4, spin ) * swirl * 0.6;
+
+		}
 
 	}
 
@@ -277,6 +320,7 @@ uniform sampler2D uDivergence;
 uniform float uDensityRecovery;
 uniform float uOffsetRecovery;
 uniform float uMaxDensity;
+uniform float uStirDecay;
 
 void main() {
 
@@ -291,7 +335,11 @@ void main() {
 	float density = min( fog.z * exp( - source * uDt ), uMaxDensity );
 	density = mix( 1.0, density, exp( - uDensityRecovery * uDt ) );
 
-	gl_FragColor = vec4( offset, density, 1.0 );
+	// かき乱され具合。衝撃の先端や渦のように普段より十分速い流れで増え、流れと一緒に運ばれて消えていく
+	float stir = fog.w * exp( - uStirDecay * uDt );
+	stir = min( stir + smoothstep( 2.5, 6.0, length( velocity ) ) * 8.0 * uDt, 1.0 );
+
+	gl_FragColor = vec4( offset, density, stir );
 
 }
 `;
@@ -346,11 +394,12 @@ export class FogSimulation {
 
 		this.params = {
 			pressureIterations: 40,
-			velocityDissipation: 0.6,
+			velocityDissipation: 0.9,
 			vorticity: 6,
 			ambient: 0.6,
 			densityRecovery: 0.12,
 			offsetRecovery: 0.08,
+			stirDecay: 1,
 			blastStrength: 24,
 			blastRadius: 1.1,
 			blastDuration: 0.35,
@@ -358,6 +407,7 @@ export class FogSimulation {
 			reach: 1.2,
 			blastPush: 1.4,
 			blastWidth: 1,
+			blastSwirl: 0.45,
 			ringWidth: 0.8,
 			maxDensity: 2.5,
 			dragRadius: 1.5,
@@ -417,6 +467,7 @@ export class FogSimulation {
 			uBlastShapes: { value: this._blastShapes },
 			uBlastPush: { value: 0 },
 			uBlastWidth: { value: 1 },
+			uBlastSwirl: { value: 0 },
 		} );
 		this._divergence = create( divergenceShader, {
 			uVelocity: { value: null },
@@ -447,6 +498,7 @@ export class FogSimulation {
 			uDensityRecovery: { value: 0 },
 			uOffsetRecovery: { value: 0 },
 			uMaxDensity: { value: 1 },
+			uStirDecay: { value: 0.5 },
 		} );
 
 		this.reset();
@@ -465,6 +517,12 @@ export class FogSimulation {
 
 	}
 
+	get curlTexture() {
+
+		return this.curl.texture;
+
+	}
+
 	reset() {
 
 		const renderer = this.renderer;
@@ -472,10 +530,10 @@ export class FogSimulation {
 		const previousColor = renderer.getClearColor( new Color() );
 		const previousAlpha = renderer.getClearAlpha();
 
-		const clear = ( target, color ) => {
+		const clear = ( target, color, alpha = 1 ) => {
 
 			renderer.setRenderTarget( target );
-			renderer.setClearColor( color, 1 );
+			renderer.setClearColor( color, alpha );
 			renderer.clear( true, false, false );
 
 		};
@@ -490,8 +548,8 @@ export class FogSimulation {
 
 		// 濃度 1 で初期化
 		const fog = new Color( 0, 0, 1 );
-		clear( this.fog.read, fog );
-		clear( this.fog.write, fog );
+		clear( this.fog.read, fog, 0 );
+		clear( this.fog.write, fog, 0 );
 
 		renderer.setRenderTarget( previousTarget );
 		renderer.setClearColor( previousColor, previousAlpha );
@@ -504,7 +562,7 @@ export class FogSimulation {
 	blast( x, z, dirX, dirZ ) {
 
 		const length = Math.hypot( dirX, dirZ ) || 1;
-		this._blasts.push( { x, z, dirX: dirX / length, dirZ: dirZ / length, age: 0 } );
+		this._blasts.push( { x, z, dirX: dirX / length, dirZ: dirZ / length, seed: Math.random() * 100, age: 0 } );
 
 		if ( this._blasts.length > MAX_BLASTS ) this._blasts.shift();
 
@@ -539,7 +597,7 @@ export class FogSimulation {
 			uniform.set( blast.x, blast.z, params.blastRadius, params.blastStrength * decay );
 			// 弧は減速しながら前へ進み、reach だけ進んだところで止まる
 			const arcRadius = params.blastRadius * params.ringStart + params.reach * ( 1 - decay );
-			this._blastShapes[ i ].set( blast.dirX, blast.dirZ, arcRadius, 0 );
+			this._blastShapes[ i ].set( blast.dirX, blast.dirZ, arcRadius, blast.seed );
 			blast.age += dt;
 
 		}
@@ -566,6 +624,7 @@ export class FogSimulation {
 		force.uDragRadius.value = params.dragRadius;
 		force.uBlastPush.value = params.blastPush;
 		force.uBlastWidth.value = params.blastWidth;
+		force.uBlastSwirl.value = params.blastSwirl;
 		this._render( this._force, this.velocity.write );
 		this.velocity.swap();
 		this._drag.set( 0, 0, 0, 0 );
@@ -608,6 +667,7 @@ export class FogSimulation {
 		advectFog.uDensityRecovery.value = params.densityRecovery;
 		advectFog.uOffsetRecovery.value = params.offsetRecovery;
 		advectFog.uMaxDensity.value = params.maxDensity;
+		advectFog.uStirDecay.value = params.stirDecay;
 		this._render( this._advectFog, this.fog.write );
 		this.fog.swap();
 
