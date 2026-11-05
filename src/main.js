@@ -6,10 +6,11 @@ import { GROUND_SIZE, getHeight, raycastTerrain } from './terrain.js';
 import { FogSimulation } from './FogSimulation.js';
 import { FogLayers } from './FogLayers.js';
 
-const diffUrl = new URL( '../textures/mud_forest_diff_1k.jxl', import.meta.url ).href;
-const norUrl = new URL( '../textures/mud_forest_nor_gl_1k.jxl', import.meta.url ).href;
-const roughUrl = new URL( '../textures/mud_forest_rough_1k.jxl', import.meta.url ).href;
-const dispUrl = new URL( '../textures/mud_forest_disp_1k.jxl', import.meta.url ).href;
+// カラーは 1024、それ以外は 512。distance 2 (非可逆)・effort 10 で圧縮したもの
+const diffUrl = new URL( '../textures/mud_forest_diff_1k_d2.jxl', import.meta.url ).href;
+const norUrl = new URL( '../textures/mud_forest_nor_gl_512_d2.jxl', import.meta.url ).href;
+const roughUrl = new URL( '../textures/mud_forest_rough_512_d2.jxl', import.meta.url ).href;
+const dispUrl = new URL( '../textures/mud_forest_disp_512_d2.jxl', import.meta.url ).href;
 
 const GROUND_SEGMENTS = 512;
 // テクスチャ 1 枚が覆う距離 (m)
@@ -28,7 +29,7 @@ scene.background = new THREE.Color( 0x6f6a84 );
 scene.fog = new THREE.Fog( 0x6f6a84, 30, 70 );
 
 const camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.1, 500 );
-camera.position.set( 0, 14, 20 );
+camera.position.set( 0, getHeight( 0, 0 ) + 9, 17.5 );
 
 const orbit = new OrbitControls( camera, renderer.domElement );
 orbit.target.set( 0, getHeight( 0, 0 ), 0 );
@@ -66,8 +67,9 @@ function createGroundGeometry() {
 
 }
 
+// テクスチャの読み込みが終わるまでは泥の平均的な色で表示する
 const groundMaterial = new THREE.MeshStandardMaterial( {
-	color: 0xffffff,
+	color: 0x2e2219,
 	roughness: 1,
 	metalness: 0,
 	displacementScale: 0.12,
@@ -76,6 +78,28 @@ const groundMaterial = new THREE.MeshStandardMaterial( {
 
 const ground = new THREE.Mesh( createGroundGeometry(), groundMaterial );
 scene.add( ground );
+
+// 霧との交差を観察するための円柱 (中央に固定)
+
+const PILLAR_RADIUS = 0.5;
+const PILLAR_HEIGHT = 4;
+
+const pillar = new THREE.Mesh(
+	new THREE.CylinderGeometry( PILLAR_RADIUS, PILLAR_RADIUS, PILLAR_HEIGHT, 48 ),
+	new THREE.MeshStandardMaterial( { color: 0x8c8478, roughness: 0.8 } ),
+);
+// 斜面でも浮かないよう、根元を周囲の一番低い地面より少し下まで埋める
+let pillarBase = Infinity;
+
+for ( let i = 0; i < 16; i ++ ) {
+
+	const angle = i / 16 * Math.PI * 2;
+	pillarBase = Math.min( pillarBase, getHeight( Math.cos( angle ) * PILLAR_RADIUS, Math.sin( angle ) * PILLAR_RADIUS ) );
+
+}
+
+pillar.position.set( 0, pillarBase - 0.2 + PILLAR_HEIGHT / 2, 0 );
+scene.add( pillar );
 
 async function loadGroundTextures() {
 
@@ -95,6 +119,7 @@ async function loadGroundTextures() {
 
 	}
 
+	groundMaterial.color.set( 0xffffff );
 	groundMaterial.map = map;
 	groundMaterial.normalMap = normalMap;
 	groundMaterial.roughnessMap = roughnessMap;
@@ -108,7 +133,7 @@ loadGroundTextures().catch( ( error ) => console.error( error ) );
 // fog
 
 const simulation = new FogSimulation( renderer, { resolution: 512, worldSize: FOG_SIZE } );
-const fogLayers = new FogLayers( simulation, { sheets: 1, segments: 192 } );
+const fogLayers = new FogLayers( simulation, { layerCount: 4, segments: 192 } );
 scene.add( fogLayers );
 
 // interaction
@@ -152,9 +177,10 @@ renderer.domElement.addEventListener( 'pointermove', ( event ) => {
 	if ( hasPreviousHit ) {
 
 		const dt = Math.max( now - previousHitTime, 1 / 120 );
-		const scale = 0.25;
-		const vx = THREE.MathUtils.clamp( ( hitPoint.x - previousHitPoint.x ) / dt * scale, - 10, 10 );
-		const vz = THREE.MathUtils.clamp( ( hitPoint.z - previousHitPoint.z ) / dt * scale, - 10, 10 );
+		// ドラッグの速さに対する霧の流れの強さ
+		const scale = 0.1;
+		const vx = THREE.MathUtils.clamp( ( hitPoint.x - previousHitPoint.x ) / dt * scale, - 4, 4 );
+		const vz = THREE.MathUtils.clamp( ( hitPoint.z - previousHitPoint.z ) / dt * scale, - 4, 4 );
 		simulation.drag( hitPoint.x, hitPoint.z, vx, vz );
 
 	}
@@ -191,11 +217,11 @@ const gui = new GUI();
 const fogUniforms = fogLayers.material.uniforms;
 const heightUniforms = fogLayers.heightMaterial.uniforms;
 const fogFolder = gui.addFolder( 'fog' );
-fogFolder.add( fogLayers, 'showFog' ).name( 'show fog' );
 fogFolder.add( fogLayers, 'showMesh' ).name( 'show mesh' );
-fogFolder.add( fogLayers.wireframe.material.uniforms.uWireOpacity, 'value', 0.02, 1 ).name( 'mesh opacity' );
-fogFolder.add( fogLayers, 'sheets', 1, 6, 1 );
-fogFolder.add( fogUniforms.uGrazingStart, 'value', 0, 1 ).name( 'grazing merge' );
+fogFolder.add( fogLayers, 'layerCount', 1, 6, 1 ).name( 'layers' );
+fogFolder.add( fogUniforms.uLayerSpacing, 'value', 0.2, 1 ).name( 'layer spacing' );
+fogFolder.add( fogUniforms.uLayerFalloff, 'value', 0, 4 ).name( 'layer falloff' );
+fogFolder.add( fogUniforms.uLayerJitter, 'value', 0, 1 ).name( 'layer jitter' );
 fogFolder.add( fogUniforms.uSwirlDetail, 'value', 0, 1 ).name( 'swirl detail' );
 fogFolder.add( fogUniforms.uResidual, 'value', 0, 1 ).name( 'hole residual' );
 fogFolder.add( heightUniforms.uThickness, 'value', 0.2, 4 ).name( 'thickness' );
@@ -226,6 +252,7 @@ fluidFolder.add( params, 'stirDecay', 0.05, 3 );
 fluidFolder.add( params, 'pressureIterations', 1, 80, 1 );
 fluidFolder.add( { reset: () => simulation.reset() }, 'reset' );
 fluidFolder.close();
+gui.close();
 
 // loop
 

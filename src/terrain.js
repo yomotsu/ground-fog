@@ -2,7 +2,29 @@ import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 
 export const GROUND_SIZE = 160;
 
-const simplex = new SimplexNoise();
+// 地形のシード。変えると別の地形になる
+export const TERRAIN_SEED = 123456789;
+
+// シード付きの擬似乱数 (mulberry32)。リロードしても同じ地形になるよう Math.random の代わりに使う
+function createRandom( seed ) {
+
+	let state = seed >>> 0;
+
+	return {
+		random() {
+
+			state = ( state + 0x6d2b79f5 ) >>> 0;
+			let t = state;
+			t = Math.imul( t ^ ( t >>> 15 ), t | 1 );
+			t ^= t + Math.imul( t ^ ( t >>> 7 ), t | 61 );
+			return ( ( t ^ ( t >>> 14 ) ) >>> 0 ) / 4294967296;
+
+		},
+	};
+
+}
+
+const simplex = new SimplexNoise( createRandom( TERRAIN_SEED ) );
 
 // 緩やかな起伏: 低周波の fBm
 export function getHeight( x, z ) {

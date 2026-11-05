@@ -1,6 +1,5 @@
 import {
 	ClampToEdgeWrapping,
-	Color,
 	HalfFloatType,
 	LinearFilter,
 	RGBAFormat,
@@ -148,7 +147,8 @@ void main() {
 
 		// 前縁の弧と一緒に前へ運ばれる渦
 		// 両端: 逆回転の大きな渦のペア。間の流れを前へ押し、外側へ巻き込む (キノコ雲の傘)
-		// 途中: 向きと位置がクリックごとにランダムな小さな渦
+		// 途中: 向きと位置がクリックごとにランダムな中くらいの渦
+		// 小さな渦を多く置くと細かくちぎれた流れになるので、大きめの渦を少なく置いてゆったり巻かせる
 		float seed = uBlastShapes[ i ].w;
 		float arcRadius = uBlastShapes[ i ].z;
 		float halfAngle = 0.785 * uBlastWidth;
@@ -159,18 +159,18 @@ void main() {
 			float spin = k == 0 ? 1.0 : - 1.0;
 			float angle = spin * halfAngle * ( 0.75 + 0.3 * hash( seed + float( k ) ) );
 			vec2 center = blast.xy + ( forward * cos( angle ) + side * sin( angle ) ) * arcRadius * 0.85;
-			force += vortex( world, center, blast.z * 0.7, spin ) * swirl;
+			force += vortex( world, center, blast.z * 1.5, spin ) * swirl;
 
 		}
 
-		for ( int k = 0; k < 3; k ++ ) {
+		for ( int k = 0; k < 2; k ++ ) {
 
 			float random = hash( seed + 7.0 + float( k ) * 3.1 );
 			float angle = ( random * 2.0 - 1.0 ) * halfAngle * 0.7;
 			float radius = arcRadius * ( 0.55 + 0.4 * hash( seed + 11.0 + float( k ) ) );
 			vec2 center = blast.xy + ( forward * cos( angle ) + side * sin( angle ) ) * radius;
 			float spin = hash( seed + 19.0 + float( k ) ) > 0.5 ? 1.0 : - 1.0;
-			force += vortex( world, center, blast.z * 0.4, spin ) * swirl * 0.6;
+			force += vortex( world, center, blast.z * 0.7, spin ) * swirl * 0.6;
 
 		}
 
@@ -249,7 +249,7 @@ void main() {
 		float arcStrength = uArcNorm * along * across / ( arcRadius * width * 1.7725 );
 
 		// 角度方向にムラを付けて、きれいな扇形にならないようにする
-		float jitter = 1.0 + 0.6 * snoise( vec3( direction * 2.0, blast.x * 0.37 + blast.y * 0.71 ) );
+		float jitter = 1.0 + 0.25 * snoise( vec3( direction * 2.0, blast.x * 0.37 + blast.y * 0.71 ) );
 		source += blast.w * ( falloff - arc * arcStrength ) * jitter;
 
 	}
@@ -274,6 +274,19 @@ void main() {
 	float divergence = texture2D( uDivergence, vUv ).x;
 	float pressure = ( l + r + b + t - divergence * cell * cell ) * 0.25;
 	gl_FragColor = vec4( pressure, 0.0, 0.0, 1.0 );
+
+}
+`;
+
+// 値をそのまま書き込む (初期化用)
+// クリア色は premultiplied alpha で RGB にアルファが掛かるため、アルファ 0 の値を正しく書けない
+const fillShader = /* glsl */`
+${ commonUniforms }
+uniform vec4 uValue;
+
+void main() {
+
+	gl_FragColor = uValue;
 
 }
 `;
@@ -395,19 +408,19 @@ export class FogSimulation {
 		this.params = {
 			pressureIterations: 40,
 			velocityDissipation: 0.9,
-			vorticity: 6,
+			vorticity: 3,
 			ambient: 0.6,
 			densityRecovery: 0.12,
 			offsetRecovery: 0.08,
 			stirDecay: 1,
-			blastStrength: 24,
+			blastStrength: 18,
 			blastRadius: 1.1,
-			blastDuration: 0.35,
+			blastDuration: 0.5,
 			ringStart: 2,
 			reach: 1.2,
 			blastPush: 1.4,
 			blastWidth: 1,
-			blastSwirl: 0.45,
+			blastSwirl: 1,
 			ringWidth: 0.8,
 			maxDensity: 2.5,
 			dragRadius: 1.5,
@@ -483,6 +496,9 @@ export class FogSimulation {
 			uPressure: { value: null },
 			uDivergence: { value: null },
 		} );
+		this._fill = create( fillShader, {
+			uValue: { value: new Vector4() },
+		} );
 		this._scale = create( scaleShader, {
 			uSource: { value: null },
 			uScale: { value: 1 },
@@ -525,34 +541,23 @@ export class FogSimulation {
 
 	reset() {
 
-		const renderer = this.renderer;
-		const previousTarget = renderer.getRenderTarget();
-		const previousColor = renderer.getClearColor( new Color() );
-		const previousAlpha = renderer.getClearAlpha();
+		const fill = ( target, x, y, z, w ) => {
 
-		const clear = ( target, color, alpha = 1 ) => {
-
-			renderer.setRenderTarget( target );
-			renderer.setClearColor( color, alpha );
-			renderer.clear( true, false, false );
+			this._fill.uniforms.uValue.value.set( x, y, z, w );
+			this._render( this._fill, target );
 
 		};
 
-		const zero = new Color( 0, 0, 0 );
-
 		for ( const target of [ this.velocity.read, this.velocity.write, this.pressure.read, this.pressure.write, this.divergence, this.curl ] ) {
 
-			clear( target, zero );
+			fill( target, 0, 0, 0, 0 );
 
 		}
 
-		// 濃度 1 で初期化
-		const fog = new Color( 0, 0, 1 );
-		clear( this.fog.read, fog, 0 );
-		clear( this.fog.write, fog, 0 );
+		// オフセット 0、濃度 1、かき乱され具合 0 で初期化
+		fill( this.fog.read, 0, 0, 1, 0 );
+		fill( this.fog.write, 0, 0, 1, 0 );
 
-		renderer.setRenderTarget( previousTarget );
-		renderer.setClearColor( previousColor, previousAlpha );
 		this._blasts = [];
 		this._drag.set( 0, 0, 0, 0 );
 

@@ -25,7 +25,7 @@ import { getHeight } from './terrain.js';
 //
 // 1. 高さパス: 霧の柱の高さ H (上面の形のノイズ・谷/斜面・流体の濃度・めくれ上がり・歪み) を
 //    毎フレーム 1 回テクスチャに書き出す
-// 2. シート: 地形に沿ったメッシュを H * (i + 1) / N まで持ち上げる (N 枚。既定は 1 枚で、霧の上面そのもの)
+// 2. 層: 地形に沿ったメッシュを H * (i + 1) / N まで持ち上げる (N 層。既定は 4 層)
 //    normal は H の勾配と地形の勾配から求める
 // 3. 透明度: 霧の板を視線が通る距離から Beer-Lambert で求める
 //    真上から見ると薄く、斜めから見ると濃くなる
@@ -64,10 +64,10 @@ varying vec2 vUv;
 // 流体のフィールドはグリッド単位の細かい乱れや、衝撃でできる鋭い段差を含む
 // そのまま頂点の高さに使うとピクピク揺れたり尖ったりするので、ガウシアンでぼかす
 // 縦横に分かれたカーネルだと小さな穴が四角くなるので、同心円状 (中心 + 6 + 12 点) にサンプルする
-// 半径の単位は 2 テクセル (約 0.75m) で、全体で約 1.5m の幅でなだらかにする
-vec4 blurred( sampler2D map, vec2 uv ) {
+// 半径の単位は scale テクセル (2 で約 0.75m、全体で約 1.5m の幅) でなだらかにする
+vec4 blurred( sampler2D map, vec2 uv, float scale ) {
 
-	vec2 t = uTerrainTexel * 2.0;
+	vec2 t = uTerrainTexel * scale;
 	vec4 sum = texture2D( map, uv );
 	float total = 1.0;
 
@@ -92,13 +92,13 @@ vec4 blurred( sampler2D map, vec2 uv ) {
 
 void main() {
 
-	vec4 fog = blurred( uFog, vUv );
+	vec4 fog = blurred( uFog, vUv, 2.0 );
 	float density = fog.z;
 
 	// 押し寄せて溜まった分 (density > 1) は頭打ちにする (2.5 でも約 1.6)
 	float excess = max( density - 1.0, 0.0 );
 	float shapeDensity = min( density, 1.0 ) + excess / ( 1.0 + excess );
-	float speed = length( blurred( uVelocity, vUv ).xy );
+	float speed = length( blurred( uVelocity, vUv, 2.0 ).xy );
 
 	// 流れで運ばれたノイズ座標
 	vec2 coord = ( vUv - 0.5 ) * uWorldSize + fog.xy;
@@ -153,7 +153,8 @@ void main() {
 	// 渦の芯らしさ。渦度は普段の流れでもグリッド単位の細かい乱れで大きくなるが、向きがバラバラなので
 	// 符号付きのままぼかすと打ち消し合う。向きの揃った本物の渦だけが残る
 	// (使う側でかき乱された所だけに掛けるので、普段の流れで多少反応しても問題ない)
-	float swirl = smoothstep( 0.8, 3.0, abs( blurred( uCurl, vUv ).x ) );
+	// 広めにぼかして、巻きが大きく柔らかい範囲で効くようにする
+	float swirl = smoothstep( 0.6, 2.5, abs( blurred( uCurl, vUv, 3.5 ).x ) );
 
 	gl_FragColor = vec4( top, wisp, swirl, opacityTop );
 
@@ -161,16 +162,21 @@ void main() {
 `;
 
 const vertexShader = /* glsl */`
+${ simplex3D }
+
 uniform sampler2D uFogHeight;
 uniform vec2 uFogHeightTexel;
 uniform float uWorldSize;
-uniform float uSheetCount;
-uniform float uGrazingStart;
+uniform float uLayerCount;
+uniform float uLayerJitter;
+uniform float uLayerSpacing;
+uniform float uTime;
 
 varying vec2 vUv;
 varying vec3 vWorldPosition;
 varying vec3 vNormal;
-varying float vSheet;
+varying float vLayer;
+varying float vLayerIndex;
 varying float vSlab;
 varying float vWisp;
 varying float vSwirl;
@@ -181,17 +187,17 @@ void main() {
 
 	vec2 uv = position.xz / uWorldSize + 0.5;
 	vec4 fog = texture2D( uFogHeight, uv );
-	float sheet = float( gl_InstanceID + 1 ) / uSheetCount;
+	float layer = float( gl_InstanceID + 1 ) / uLayerCount;
 
-	// 浅い角度から見るとシートが別々の層として見えるので、視線が寝るほど上面に寄せて 1 枚に重ねる
-	// (透明度は霧全体の厚みで決まるので、重なっても濃さは変わらない)
-	vec3 terrainPosition = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
-	float viewCosine = abs( dot( normalize( cameraPosition - terrainPosition ), normal ) );
-	float grazing = 1.0 - smoothstep( uGrazingStart * 0.4, uGrazingStart, viewCosine );
-	sheet = mix( sheet, 1.0, grazing );
+	// 層の縁が平行に揃うと段差の線として見えるので、層ごとに違うノイズで高さを少しずらす
+	// (一番上の層は霧の上面の形を保つため、ずらさない)
+	float index = float( gl_InstanceID );
+	float jitter = snoise( vec3( position.xz * 0.3, index * 3.7 + uTime * 0.05 ) );
+	layer = clamp( layer + jitter * uLayerJitter / uLayerCount * step( index + 1.5, uLayerCount ), 0.0, 1.0 );
 
+	// uLayerSpacing で層の間隔だけを詰める (濃さは霧の厚みから求めるので変わらない)
 	vec3 transformed = position;
-	transformed.y += fog.x * sheet;
+	transformed.y += fog.x * layer * uLayerSpacing;
 
 	// normal: 地形の勾配 + 霧の高さの勾配 (2 テクセル幅の差分で滑らかにする)
 	vec2 offset = uFogHeightTexel * 2.0;
@@ -199,13 +205,14 @@ void main() {
 	float hx = texture2D( uFogHeight, uv + vec2( offset.x, 0.0 ) ).x - texture2D( uFogHeight, uv - vec2( offset.x, 0.0 ) ).x;
 	float hz = texture2D( uFogHeight, uv + vec2( 0.0, offset.y ) ).x - texture2D( uFogHeight, uv - vec2( 0.0, offset.y ) ).x;
 	vec2 terrainGradient = - normal.xz / normal.y;
-	vec2 gradient = terrainGradient + vec2( hx, hz ) / ( 2.0 * cell ) * sheet;
+	vec2 gradient = terrainGradient + vec2( hx, hz ) / ( 2.0 * cell ) * layer * uLayerSpacing;
 
 	vUv = uv;
 	vWorldPosition = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
 	vNormal = normalize( vec3( - gradient.x, 1.0, - gradient.y ) );
-	vSheet = sheet;
-	vSlab = fog.w / uSheetCount;
+	vLayer = layer;
+	vLayerIndex = float( gl_InstanceID );
+	vSlab = fog.w / uLayerCount;
 	vWisp = fog.y;
 	vSwirl = fog.z;
 
@@ -225,6 +232,10 @@ uniform float uTime;
 uniform vec2 uWind;
 uniform float uSwirlDetail;
 uniform float uResidual;
+uniform vec2 uFogTexel;
+uniform float uLayerFalloff;
+uniform float uLayerCount;
+uniform float uLayerWeightSum;
 uniform float uOpacity;
 uniform vec3 uColorLow;
 uniform vec3 uColorHigh;
@@ -233,7 +244,8 @@ uniform vec3 uLightDirection;
 varying vec2 vUv;
 varying vec3 vWorldPosition;
 varying vec3 vNormal;
-varying float vSheet;
+varying float vLayer;
+varying float vLayerIndex;
 varying float vSlab;
 varying float vWisp;
 varying float vSwirl;
@@ -252,12 +264,26 @@ void main() {
 	float density = fog.z;
 
 	// 穴: 濃度に応じて霧の板を薄くする。衝撃で吹き飛ばされた所でも uResidual だけうっすら残す
-	float remain = mix( uResidual, 1.0, smoothstep( 0.0, 0.9, density ) );
+	// 縁がトゲトゲに硬くならないよう、周囲 5 点 (半径約 0.5m) で平均した濃度を広めの幅で使う
+	// (テクセルの間で線形補間されるので、斜め 4 点でも十分なめらかになる)
+	vec2 offset = uFogTexel * 2.0;
+	float softDensity = density * 0.2;
+	softDensity += texture2D( uFog, vUv + offset ).z * 0.2;
+	softDensity += texture2D( uFog, vUv - offset ).z * 0.2;
+	softDensity += texture2D( uFog, vUv + vec2( offset.x, - offset.y ) ).z * 0.2;
+	softDensity += texture2D( uFog, vUv + vec2( - offset.x, offset.y ) ).z * 0.2;
 
-	// 厚さ vSlab の板を視線が通る長さ。浅い角度で急に濃くなりシートの輪郭が帯状に目立つので、
+	float remain = mix( uResidual, 1.0, smoothstep( 0.0, 1.0, softDensity ) );
+
+	// 厚さ vSlab の板を視線が通る長さ。浅い角度で急に濃くなり層の輪郭が帯状に目立つので、
 	// 下限を高めにして濃さの上がり方を抑える
 	float cosine = max( abs( dot( viewDirection, normal ) ), 0.3 );
-	float path = vSlab * remain / cosine;
+	// 層ごとの濃さの配分。下の層ほど濃く、上ほど薄くして、霧の上の縁をグラデーションで消す
+	// (1 枚の面だと縁がスパッと切れ、浅い角度で丘の峰ごとの霧の帯が層のように見える)
+	// 合計は変わらないよう正規化する (uLayerWeightSum は CPU 側で計算)
+	float layerIndex = floor( vLayerIndex + 0.5 );
+	float weight = pow( 1.0 - layerIndex / uLayerCount, uLayerFalloff ) / uLayerWeightSum * uLayerCount;
+	float path = vSlab * remain * weight / cosine;
 	float extinction = uOpacity * mix( 0.25, 1.0, smoothstep( 0.15, 0.85, vWisp ) );
 	float alpha = 1.0 - exp( - extinction * path );
 
@@ -271,10 +297,10 @@ void main() {
 	if ( stir > 0.01 ) {
 
 		vec2 coord = vWorldPosition.xz + fog.xy - uWind * uTime * 1.8;
-		float phase = uTime * 0.12 + vSheet * 0.7;
+		float phase = uTime * 0.12 + vLayer * 0.7;
 
-		vec3 q = vec3( coord * 0.45, phase );
-		float smoothDetail = snoise( q ) * 0.85 + snoise( q * 2.0 + 3.0 ) * 0.15;
+		vec3 q = vec3( coord * 0.32, phase );
+		float smoothDetail = snoise( q ) * 0.9 + snoise( q * 2.0 + 3.0 ) * 0.1;
 		float smoothMask = smoothstep( - 1.0, 1.0, smoothDetail );
 
 		float curl = smoothstep( 0.05, 0.5, vSwirl );
@@ -282,9 +308,9 @@ void main() {
 
 		if ( curl > 0.01 ) {
 
-			vec3 r = vec3( coord * 0.8, phase );
-			float fineDetail = snoise( r ) * 0.6 + snoise( r * 2.3 + 3.0 ) * 0.4;
-			mask = mix( smoothMask, smoothstep( - 0.8, 0.8, fineDetail ), curl );
+			vec3 r = vec3( coord * 0.4, phase );
+			float fineDetail = snoise( r ) * 0.8 + snoise( r * 2.0 + 3.0 ) * 0.2;
+			mask = mix( smoothMask, smoothstep( - 0.55, 0.55, fineDetail ), curl );
 			smoothDetail = mix( smoothDetail, fineDetail, curl );
 
 		}
@@ -296,9 +322,9 @@ void main() {
 
 	}
 
-	// 太陽側を向いた面・上のシートほど明るい。押し寄せて溜まった所はわずかに明るくする
+	// 太陽側を向いた面・上の層ほど明るい。押し寄せて溜まった所はわずかに明るくする
 	float light = dot( normal, uLightDirection ) * 0.5 + 0.5;
-	float brightness = light * 0.45 + vSheet * 0.2 + min( max( density - 1.0, 0.0 ), 1.0 ) * 0.08 + detail * 0.04;
+	float brightness = light * 0.45 + vLayer * 0.2 + min( max( density - 1.0, 0.0 ), 1.0 ) * 0.08 + detail * 0.04;
 	vec3 color = mix( uColorLow, uColorHigh, clamp( brightness, 0.0, 1.0 ) );
 
 	gl_FragColor = vec4( color, alpha );
@@ -308,21 +334,21 @@ void main() {
 }
 `;
 
-// メッシュ表示用。霧と同じ頂点シェーダーで、シートごとに色を変えたワイヤーフレームを描く
+// メッシュ表示用。霧と同じ頂点シェーダーで、層ごとに色を変えたワイヤーフレームを描く
 const wireframeFragmentShader = /* glsl */`
 uniform vec3 uWireColorLow;
 uniform vec3 uWireColorHigh;
 uniform float uWireOpacity;
-uniform float uSheetCount;
+uniform float uLayerCount;
 
-varying float vSheet;
+varying float vLayer;
 
 #include <fog_pars_fragment>
 
 void main() {
 
-	// 一番下のシートが uWireColorLow、一番上が uWireColorHigh
-	float t = ( vSheet * uSheetCount - 1.0 ) / max( uSheetCount - 1.0, 1.0 );
+	// 一番下の層が uWireColorLow、一番上が uWireColorHigh
+	float t = ( vLayer * uLayerCount - 1.0 ) / max( uLayerCount - 1.0, 1.0 );
 	gl_FragColor = vec4( mix( uWireColorLow, uWireColorHigh, t ), uWireOpacity );
 
 	#include <fog_fragment>
@@ -360,7 +386,7 @@ function createTerrainTexture( size, resolution ) {
 
 export class FogLayers extends Mesh {
 
-	constructor( simulation, { sheets = 1, segments = 192, heightResolution = 256 } = {} ) {
+	constructor( simulation, { layerCount = 4, segments = 192, heightResolution = 256 } = {} ) {
 
 		const size = simulation.worldSize;
 
@@ -377,12 +403,12 @@ export class FogLayers extends Mesh {
 
 		plane.computeVertexNormals();
 
-		// シートは gl_InstanceID で区別する
+		// 層は gl_InstanceID で区別する
 		const geometry = new InstancedBufferGeometry();
 		geometry.index = plane.index;
 		geometry.setAttribute( 'position', plane.attributes.position );
 		geometry.setAttribute( 'normal', plane.attributes.normal );
-		geometry.instanceCount = sheets;
+		geometry.instanceCount = layerCount;
 
 		const heightTexel = new Vector2( 1 / heightResolution, 1 / heightResolution );
 
@@ -396,12 +422,16 @@ export class FogLayers extends Mesh {
 					uFog: { value: null },
 					uTime: { value: 0 },
 					uWind: { value: null },
-					uSwirlDetail: { value: 0.4 },
+					uSwirlDetail: { value: 0.6 },
 					uResidual: { value: 0.15 },
+					uLayerFalloff: { value: 1.5 },
+					uLayerWeightSum: { value: 1 },
+					uLayerJitter: { value: 0.6 },
+					uLayerSpacing: { value: 0.25 },
+					uFogTexel: { value: new Vector2( 1 / simulation.resolution, 1 / simulation.resolution ) },
 					uFogHeightTexel: { value: heightTexel },
 					uWorldSize: { value: size },
-					uSheetCount: { value: sheets },
-					uGrazingStart: { value: 0.6 },
+					uLayerCount: { value: layerCount },
 					uOpacity: { value: 1.4 },
 					uColorLow: { value: new Color( 0x968daf ) },
 					uColorHigh: { value: new Color( 0xf0ecf7 ) },
@@ -446,7 +476,7 @@ export class FogLayers extends Mesh {
 				uWind: { value: new Vector2( 0.35, 0.12 ) },
 				uHeightRange: { value: new Vector2( terrain.minHeight, terrain.maxHeight ) },
 				uThickness: { value: 1.4 },
-				uDistortion: { value: 0.12 },
+				uDistortion: { value: 0.2 },
 				uLift: { value: 0.25 },
 			},
 			depthTest: false,
@@ -480,16 +510,16 @@ export class FogLayers extends Mesh {
 
 	}
 
-	get sheets() {
+	get layerCount() {
 
 		return this.geometry.instanceCount;
 
 	}
 
-	set sheets( value ) {
+	set layerCount( value ) {
 
 		this.geometry.instanceCount = value;
-		this.material.uniforms.uSheetCount.value = value;
+		this.material.uniforms.uLayerCount.value = value;
 
 	}
 
@@ -519,7 +549,19 @@ export class FogLayers extends Mesh {
 
 	update( renderer, time ) {
 
-		this.material.uniforms.uFog.value = this.simulation.fogTexture;
+		// 層ごとの濃さの配分の合計 (フラグメントでの正規化用)
+		const layerUniforms = this.material.uniforms;
+		const count = layerUniforms.uLayerCount.value;
+		let weightSum = 0;
+
+		for ( let i = 0; i < count; i ++ ) {
+
+			weightSum += Math.pow( 1 - i / count, layerUniforms.uLayerFalloff.value );
+
+		}
+
+		layerUniforms.uLayerWeightSum.value = weightSum;
+		layerUniforms.uFog.value = this.simulation.fogTexture;
 
 		const uniforms = this.heightMaterial.uniforms;
 		uniforms.uTime.value = time;

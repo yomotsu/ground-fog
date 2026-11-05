@@ -8,6 +8,17 @@
 	<style>
 		html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
 		canvas { display: block; }
+
+		.guide {
+			position: fixed;
+			left: 16px;
+			bottom: 16px;
+			margin: 0;
+			font: 13px/1.5 system-ui, sans-serif;
+			color: rgba( 255, 255, 255, 0.8 );
+			pointer-events: none;
+			user-select: none;
+		}
 	</style>
 	<script type="importmap">
 		{
@@ -21,6 +32,7 @@
 	</script>
 </head>
 <body>
+	<p class="guide">Click to blast the fog<br>Shift + drag to stir the fog</p>
 	<script type="module" src="./src/main.js"></script>
 </body>
 </html>
