@@ -221,6 +221,7 @@ uniform int uSteps;
 uniform float uOpacity;
 uniform float uFalloff;
 uniform float uNoise;
+uniform float uJitterScale;
 uniform float uTime;
 uniform vec2 uWind;
 uniform vec2 uSceneFog;
@@ -258,7 +259,8 @@ void main() {
 	}
 
 	// 歩数が少ないと縞が出るので、開始位置をピクセルごとにずらす (interleaved gradient noise)
-	float jitter = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
+	float randomOffset = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
+	float jitter = 0.5 + ( randomOffset - 0.5 ) * uJitterScale;
 	float stepLength = ( far - near ) / float( uSteps );
 
 	// 色は明るさ b について線形 ( mix( low, high, b ) ) なので、Σ寄与 と Σ寄与 * b だけを積算し、
@@ -334,6 +336,7 @@ uniform float uCameraNear;
 uniform float uCameraFar;
 uniform vec3 uColorLow;
 uniform vec3 uColorHigh;
+uniform float uUpsampleBlur;
 
 varying vec2 vUv;
 
@@ -356,7 +359,7 @@ void main() {
 			vec2 texel = center + vec2( float( x ), float( y ) );
 			vec4 fogTexel = texture2D( uFogTexture, texel / uFogSize );
 			vec2 d = texel - position;
-			float spatial = exp( - dot( d, d ) * 0.7 );
+			float spatial = exp( - dot( d, d ) * mix( 0.7, 0.0, uUpsampleBlur ) );
 			float weight = spatial / ( 1e-2 + abs( fogTexel.b - depth ) / depth * 20.0 );
 			fog += fogTexel * weight;
 			total += weight;
@@ -501,6 +504,7 @@ export class VolumetricFog {
 				uOpacity: { value: 1.4 },
 				uFalloff: { value: 1.5 },
 				uNoise: { value: 0.5 },
+				uJitterScale: { value: 0.5 },
 				uTime: { value: 0 },
 				uWind: { value: this._wind },
 				uSceneFog: { value: new Vector2( 30, 70 ) },
@@ -523,6 +527,7 @@ export class VolumetricFog {
 				uCameraFar: { value: 500 },
 				uColorLow: { value: new Color( 0x968daf ) },
 				uColorHigh: { value: new Color( 0xf0ecf7 ) },
+				uUpsampleBlur: { value: 1.0 },
 			},
 			depthTest: false,
 			depthWrite: false,
@@ -532,6 +537,7 @@ export class VolumetricFog {
 		// GUI 用
 		this.colorLow = this._compositeMaterial.uniforms.uColorLow.value;
 		this.colorHigh = this._compositeMaterial.uniforms.uColorHigh.value;
+		this.upsampleBlur = this._compositeMaterial.uniforms.uUpsampleBlur;
 
 	}
 

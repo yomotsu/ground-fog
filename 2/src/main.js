@@ -266,6 +266,8 @@ boundsFolder.close();
 const qualityFolder = gui.addFolder( 'quality' );
 qualityFolder.add( volumetricFog, 'steps', 8, 64, 1 );
 qualityFolder.add( volumetricFog, 'resolutionScale', 0.25, 1, 0.05 ).name( 'resolution' ).onFinishChange( ( value ) => volumetricFog.setResolutionScale( value ) );
+qualityFolder.add( marchUniforms.uJitterScale, 'value', 0, 1, 0.05 ).name( 'march jitter' );
+qualityFolder.add( volumetricFog.upsampleBlur, 'value', 0, 1, 0.05 ).name( 'filter softness' );
 qualityFolder.close();
 
 const solverFolder = gui.addFolder( 'fluid' );
