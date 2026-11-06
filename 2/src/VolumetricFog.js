@@ -504,7 +504,7 @@ export class VolumetricFog {
 				uOpacity: { value: 2 },
 				uFalloff: { value: 1.5 },
 				uNoise: { value: 0.5 },
-				uJitterScale: { value: 0.25 },
+				uJitterScale: { value: 0.5 },
 				uTime: { value: 0 },
 				uWind: { value: this._wind },
 				uSceneFog: { value: new Vector2( 30, 70 ) },
