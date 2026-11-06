@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>ground fog 2 (volumetric)</title>
+	<link rel="icon" href="data:,">
+	<style>
+		html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+		canvas { display: block; }
+
+		.guide {
+			position: fixed;
+			left: 16px;
+			bottom: 16px;
+			margin: 0;
+			font: 13px/1.5 system-ui, sans-serif;
+			color: rgba( 255, 255, 255, 0.8 );
+			pointer-events: none;
+			user-select: none;
+		}
+	</style>
+	<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/",
+				"jxl-oxide-wasm": "https://cdn.jsdelivr.net/npm/jxl-oxide-wasm@0.12.6/jxl_oxide_wasm.js",
+				"fast-png": "https://cdn.jsdelivr.net/npm/fast-png@8.0.0/+esm"
+			}
+		}
+	</script>
+</head>
+<body>
+	<p class="guide">Click to blast the fog<br>Shift + drag to stir the fog</p>
+	<script type="module" src="./src/main.js"></script>
+</body>
+</html>
