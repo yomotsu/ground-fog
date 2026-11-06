@@ -141,7 +141,7 @@ const solvers = {
 	procedural: new FlowField( renderer, { resolution: 512, worldSize: FOG_SIZE } ),
 };
 let simulation = solvers.procedural;
-const volumetricFog = new VolumetricFog( renderer, simulation, { resolutionScale: 0.5 } );
+const volumetricFog = new VolumetricFog( renderer, simulation, { resolutionScale: 1 } );
 volumetricFog.setSize( window.innerWidth, window.innerHeight );
 
 // 霧を出す水平の範囲 (中心と大きさ、m)
