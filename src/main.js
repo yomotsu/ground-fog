@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { loadJXLTexture } from './loadJXLTexture.js';
 import { GROUND_SIZE, getHeight, raycastTerrain } from './terrain.js';
-import { FogSimulation } from './FogSimulation.js';
+import { FlowField } from '../2/src/FlowField.js';
 import { FogLayers } from './FogLayers.js';
 
 // カラーは 1024、それ以外は 512。distance 2 (非可逆)・effort 10 で圧縮したもの
@@ -132,7 +132,8 @@ loadGroundTextures().catch( ( error ) => console.error( error ) );
 
 // fog
 
-const simulation = new FogSimulation( renderer, { resolution: 512, worldSize: FOG_SIZE } );
+const simulation = new FlowField( renderer, { resolution: 512, worldSize: FOG_SIZE } );
+simulation.updateRate = 30;
 const fogLayers = new FogLayers( simulation, { layerCount: 4, segments: 192 } );
 scene.add( fogLayers );
 
@@ -233,23 +234,35 @@ fogFolder.addColor( { color: fogUniforms.uColorHigh.value.getHex() }, 'color' ).
 
 const fluidFolder = gui.addFolder( 'fluid' );
 const params = simulation.params;
-fluidFolder.add( params, 'blastStrength', 0, 40 );
-fluidFolder.add( params, 'blastRadius', 0.3, 5 );
-fluidFolder.add( params, 'blastDuration', 0.05, 1 );
-fluidFolder.add( params, 'ringStart', 1, 4 );
-fluidFolder.add( params, 'reach', 0, 10 );
-fluidFolder.add( params, 'blastPush', 0, 5 );
-fluidFolder.add( params, 'blastWidth', 0.1, 1.5 );
-fluidFolder.add( params, 'blastSwirl', 0, 3 );
-fluidFolder.add( params, 'ringWidth', 0.2, 2 );
-fluidFolder.add( params, 'maxDensity', 1, 5 );
-fluidFolder.add( params, 'vorticity', 0, 30 );
-fluidFolder.add( params, 'ambient', 0, 3 );
-fluidFolder.add( params, 'velocityDissipation', 0, 3 );
-fluidFolder.add( params, 'densityRecovery', 0, 1 );
-fluidFolder.add( params, 'offsetRecovery', 0, 1 );
-fluidFolder.add( params, 'stirDecay', 0.05, 3 );
-fluidFolder.add( params, 'pressureIterations', 1, 80, 1 );
+const fluidRanges = {
+	blastStrength: [ 0, 40 ],
+	blastRadius: [ 0.3, 5 ],
+	blastDuration: [ 0.05, 1 ],
+	ringStart: [ 1, 4 ],
+	reach: [ 0, 10 ],
+	blastWidth: [ 0.1, 1.5 ],
+	blastSwirl: [ 0, 5 ],
+	swirlDuration: [ 0.1, 4 ],
+	refillStrength: [ 0, 1 ],
+	refillDelay: [ 0.2, 3 ],
+	ringWidth: [ 0.2, 2 ],
+	maxDensity: [ 1, 5 ],
+	ambient: [ 0, 3 ],
+	densityRecovery: [ 0, 1 ],
+	offsetRecovery: [ 0, 1 ],
+	stirDecay: [ 0.05, 3 ],
+	dragRadius: [ 0.3, 5 ],
+	dragDuration: [ 0.05, 2 ],
+};
+
+for ( const [ key, range ] of Object.entries( fluidRanges ) ) {
+	fluidFolder.add( params, key, ...range );
+}
+
+const fluidSettings = { updateRate: 30 };
+fluidFolder.add( fluidSettings, 'updateRate', [ 60, 30, 20 ] ).name( 'update rate' ).onChange( ( value ) => {
+	simulation.updateRate = value;
+} );
 fluidFolder.add( { reset: () => simulation.reset() }, 'reset' );
 fluidFolder.close();
 gui.close();

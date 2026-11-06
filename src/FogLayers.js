@@ -432,7 +432,7 @@ export class FogLayers extends Mesh {
 					uFogHeightTexel: { value: heightTexel },
 					uWorldSize: { value: size },
 					uLayerCount: { value: layerCount },
-					uOpacity: { value: 1.4 },
+					uOpacity: { value: 2 },
 					uColorLow: { value: new Color( 0x968daf ) },
 					uColorHigh: { value: new Color( 0xf0ecf7 ) },
 					uLightDirection: { value: new Vector3( - 0.6, 0.6, - 0.4 ).normalize() },

@@ -66,28 +66,28 @@ uniform float uSwirlDetail;
 varying vec2 vUv;
 
 // 流体のフィールドはグリッド単位の細かい乱れや、衝撃でできる鋭い段差を含む
-// 形に使うと尖るので、同心円状 (中心 + 6 + 12 点) のガウシアンでぼかす
+// 形に使うと尖るので、半径 2 段の13点カーネルでぼかす
 // 半径の単位は scale * uBlurTexel (scale 2 で約 0.75m)
 vec4 blurred( sampler2D map, vec2 uv, float scale ) {
 
 	vec2 t = uBlurTexel * scale;
 	vec4 sum = texture2D( map, uv );
 
-	for ( int k = 0; k < 6; k ++ ) {
+	for ( int k = 0; k < 4; k ++ ) {
 
-		float angle = float( k ) * 1.0472;
-		sum += texture2D( map, uv + vec2( cos( angle ), sin( angle ) ) * t ) * 0.6;
-
-	}
-
-	for ( int k = 0; k < 12; k ++ ) {
-
-		float angle = float( k ) * 0.5236 + 0.2618;
-		sum += texture2D( map, uv + vec2( cos( angle ), sin( angle ) ) * t * 2.0 ) * 0.14;
+		float angle = float( k ) * 1.5708;
+		sum += texture2D( map, uv + vec2( cos( angle ), sin( angle ) ) * t ) * 0.9;
 
 	}
 
-	return sum / ( 1.0 + 6.0 * 0.6 + 12.0 * 0.14 );
+	for ( int k = 0; k < 8; k ++ ) {
+
+		float angle = float( k ) * 0.7854 + 0.3927;
+		sum += texture2D( map, uv + vec2( cos( angle ), sin( angle ) ) * t * 2.0 ) * 0.21;
+
+	}
+
+	return sum / ( 1.0 + 4.0 * 0.9 + 8.0 * 0.21 );
 
 }
 
@@ -500,11 +500,11 @@ export class VolumetricFog {
 				uBounds: { value: new Vector4() },
 				uBoundsFade: { value: 2 },
 				uMaxDistance: { value: 70 },
-				uSteps: { value: 32 },
-				uOpacity: { value: 1.4 },
+				uSteps: { value: 16 },
+				uOpacity: { value: 2 },
 				uFalloff: { value: 1.5 },
 				uNoise: { value: 0.5 },
-				uJitterScale: { value: 0.5 },
+				uJitterScale: { value: 0.25 },
 				uTime: { value: 0 },
 				uWind: { value: this._wind },
 				uSceneFog: { value: new Vector2( 30, 70 ) },
